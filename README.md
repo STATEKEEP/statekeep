@@ -2,13 +2,11 @@
 
 # STATEKEEP
 
-### Pay for proven, durable state. Not calls.
+### Protocols can become self-healing without trusting the healer.
 
-Automation pays for the call. STATEKEEP pays only when the resulting onchain state is actually true — and stays true.
+A protocol declares what "healthy" means and how it may be repaired. When it degrades, anyone can attempt a recovery — and the protocol pays only when the resulting on-chain state is actually valid and stays valid.
 
-The whole product is an argument for the difference between *paying for activity* and *paying for reality*.
-
-[Live demo ↗]() · [Explorer ↗]() · [Architecture ↓](#architecture) · [Run locally ↓](#run-it-locally)
+The whole design is an argument for one distinction: settle on the **result**, not on the action.
 
 Built for Solana. MIT licensed.
 
@@ -19,8 +17,9 @@ Built for Solana. MIT licensed.
 ## Table of contents
 
 - [▶ See it in one command](#-see-it-in-one-command)
-- [The problem STATEKEEP solves](#the-problem-statekeep-solves)
+- [The problem](#the-problem)
 - [How STATEKEEP works](#how-statekeep-works)
+- [The recovery contract](#the-recovery-contract)
 - [Architecture](#architecture)
 - [The invariant](#the-invariant)
 - [Safety, enforced on-chain](#safety-enforced-on-chain)
@@ -39,162 +38,209 @@ Built for Solana. MIT licensed.
 
 ## ▶ See it in one command
 
-> Status: pending — the program is not deployed yet. This section will show real `solana` CLI output against a live deployment when the build lands. No fabricated output.
+> Status: pending — the program is not deployed yet. This section will show real CLI output against a live deployment when the build lands. No fabricated output.
 
 ```
-# (coming with the first devnet deployment)
+# (coming with the first deployment)
 ```
 
-## The problem STATEKEEP solves
+## The problem
+
+Protocols have safety conditions — a lending market whose reserves must cover withdrawals, a vault whose accounting must balance. Today those conditions are defended by a **designated keeper**: one operator's bot that is supposed to notice a problem and act. If that bot is down, slow, or wrong, the state rots, and the protocol pays for **activity** — a function call — rather than for the **result**.
 
 | Problem | Impact |
 |---|---|
-| Keeper networks pay for the call, not the result | A keeper can call `performUpkeep()` on a useless path and still get paid — the protocol pays for activity, and activity can be theater |
-| One designated keeper is a single point of failure | If the keeper is down, slow, or compromised, the state nobody was watching rots — Aug 2026: a manipulated oracle forced ~$36M of liquidations on a single Morpho market |
-| A state that is true for one block is treated as fixed | Transient fixes get paid as if they were durable repairs — temporary state looks identical to real repair at claim time |
-| Fixing one metric by breaking another is undetectable | An executor can push the headline number into range while silently draining a protected balance |
-| Post-incident detection is not prevention | Forensics can name the invariant that was violated; nothing enforces it before the money moves |
+| Automation pays for the call, not the outcome | A keeper can call the upkeep function on a useless path and still be paid |
+| One designated keeper is a single point of failure | When the keeper is down, nobody is watching the condition that matters |
+| A state that is true for one block is treated as fixed | A one-block fix is paid for as if it were a durable repair |
+| Fixing one metric by breaking another is undetectable | An operator can push the headline number into range while silently draining a protected balance |
+| Recovery is designed *after* the failure | The protocol has no pre-installed, bounded path to get healthy again |
 
-The 2026 record is the receipt: KelpDAO ($292M, Apr 2026), Drift ($285M, Apr 2026), Stream Finance ($285M contagion, Nov 2025), Resolv ($25M, Mar 2026), Morpho PT-reUSD ($36M liquidations, Aug 2026). The audit literature is explicit: *"correct protocol behavior depends on timely external execution"* and keeper centralization *"creates single-point-of-failure dependencies."*
+The 2026 record is the receipt: KelpDAO ($292M, Apr 2026), Drift ($285M, Apr 2026), Stream Finance ($285M contagion, Nov 2025), Resolv ($25M, Mar 2026), and a Morpho market whose manipulated oracle forced ~$36M of liquidations (Aug 2026). The audit literature says it plainly: *"correct protocol behavior depends on timely external execution"* and keeper centralization *"creates single-point-of-failure dependencies."*
 
 ## How STATEKEEP works
 
-### 1 · A protocol funds a condition, not a job
+### 1 · The protocol defines what "healthy" is
 
-A protocol publishes a standing economic condition and attaches a reward. No `performUpkeep()`, no designated keeper, no prescribed transaction:
+A protocol registers a **recovery contract**: the health condition, the transitions allowed to repair it, the state that must never be harmed, the reward, and how long a repair must hold.
 
 ```
-PROTOCOL CONDITION        reserve_ratio >= 80%
-MAINTENANCE REWARD        1 SOL
-DURABILITY WINDOW         M slots
+HEALTH CONDITION      reserve_ratio >= 80%
+ALLOWED RECOVERY      withdraw insurance · rebalance pool · repay debt
+PROTECTED STATE       user principal unchanged · debt <= baseline
+RECOVERY REWARD       as registered
+DURABILITY WINDOW     M slots
 ```
 
-Anyone may compete to make the condition true. The execution path is disposable. The predicate is the interface.
+There is no arbitrary mutation. The protocol pre-authorizes the shape of a valid recovery, so nobody is ever handed open admin authority over live state.
 
-### 2 · Executors compete to produce the state
+### 2 · Degraded state opens a bounded, one-use recovery authority
 
-Any executor may change the protocol's state through any route. At claim time the executor submits a claim transaction; the STATEKEEP program CPIs the protocol's own predicate program against the **current state** of the accounts passed to it, and the predicate returns `bool`.
+When the condition breaks, the protocol enters recovery mode. A **recovery capability** is created — scoped to this incident, this state, these allowed transitions, this deadline — and it is consumed by the recovery that uses it.
 
 ```
 claim()
-  └─> CPI: predicate_program.evaluate(accounts, config) -> bool
-        ├─ FALSE -> rejected, no payment
-        └─ TRUE  -> 25% paid now, 75% locked pending durability
+  └─> the recovery is evaluated against the CURRENT state
+        ├─ invalid  -> rejected, no payment
+        └─ valid    -> the recovery is applied, the capability is consumed
 ```
 
-The executor is deliberately irrelevant. No payment merely because a target instruction executed.
+### 3 · Candidate recoveries can be rehearsed before they touch reality
 
-### 3 · Durability, not transience
-
-The plain claim-time design proves a state was true for one moment — not that it lasted. So STATEKEEP splits the reward and locks a bond:
+A recovery may be explored against a sealed copy of the exact current state — candidate transitions tried, invariants checked, the best valid one selected — and only the proven transition is applied to live state by the program that owns it.
 
 ```
-CLAIM (state true)
-  │  25% paid immediately
-  ▼
-PENDING (M-slot maturity window, bond locked)
-  │
-  ▼
-FINAL CHECK (anyone may call finalize)
-  ├─ state held  -> 75% released
-  └─ state broke -> deferred reward forfeited, bond slashed per protocol rule
+LIVE STATE
+   │ seal
+   ▼
+REHEARSAL  ── candidate A / B / C ──> invariant checks
+   │
+   ▼
+one proven transition
+   │
+   ▼
+LIVE PROGRAM applies the delta   (the program keeps ownership throughout)
 ```
 
-**No executor receives the full reward merely because the state was true at claim time.** The economic promise is: *we pay for durable state, not a momentary state.*
+### 4 · Whole-state reconciliation, not one metric
 
-### 4 · The adversarial harness is part of the product
+The protocol does not check a single headline number. It reconciles the entire protected surface:
 
-The protocol never verifies "did the executor call the approved function?" It verifies "is the economic state inside the promised predicate?" So the test surface is the predicate itself. The build ships a harness that generates adversarial transitions — fake results, partial completion, rounding exploits, integer boundaries, account substitution, temporary state, unauthorized side effects — and proves the predicate cannot be gamed.
+```
+BEFORE                    AFTER
+reserve      $600k        $820k
+user funds   $1.2M        $1.2M     (unchanged)
+debt         $900k        $850k
+fees         $30k         $31k
+```
+
+A recovery that moves the headline metric by sacrificing protected state is rejected.
+
+### 5 · Payment settles on durable state, not on the attempt
+
+Reward is split. Part is paid when a valid recovery lands; the remainder is held behind a durability window, and released only if the state still holds when the window closes. If it regresses, the remainder is forfeited and the executor's bond is slashed per the protocol's rule.
+
+```
+VALID RECOVERY
+   │  partial reward now
+   ▼
+PENDING (M-slot window, bond locked)
+   │
+   ▼
+final check
+   ├─ still healthy -> remainder released
+   └─ regressed     -> remainder forfeited, bond slashed
+```
+
+**No recovery is paid in full merely because the state was true at claim time.**
+
+### 6 · A successful recovery can become a reusable capsule
+
+A recovery that is proven valid and durable can be registered as a **recovery capsule** — a machine-recognized strategy for future incidents of the same shape. The protocol's ability to recover compounds instead of being relearned.
+
+## The recovery contract
+
+The recovery contract is the object. Not a job, not a bounty, not a keeper subscription:
+
+```
+THIS PROTOCOL becomes unhealthy when X
+THIS is the allowed way to recover
+THIS may never be damaged
+THIS is the reward
+THIS is how long recovery must survive
+```
+
+The separation is the whole design: **the protocol defines safety, the executor discovers execution, the chain decides settlement.**
 
 ## Architecture
 
 ```
         ┌─────────────────────────────────────────────────┐
         │                   PROTOCOL                       │
-        │  defines predicate + funds maintenance reward    │
+        │  registers: health condition · allowed repairs    │
+        │  · protected state · reward · durability window   │
         └───────────────┬─────────────────────────────────┘
-                        │ deploy + fund
-                        ▼
-        ┌─────────────────────────────────────────────────┐
-        │                 STATEKEEP (Anchor)               │
-        │  create_market · fund_market · claim · finalize  │
-        │  slash · expire                                  │
-        └───────────────┬─────────────────────────────────┘
-                        │ CPI evaluate()
-                        ▼
-        ┌─────────────────────────────────────────────────┐
-        │            PROTOCOL PREDICATE PROGRAM            │
-        │  predicate(accounts, config) -> bool             │
-        └─────────────────────────────────────────────────┘
                         │
                         ▼
         ┌─────────────────────────────────────────────────┐
-        │   executor state change (any path) + claim tx    │
-        └─────────────────────────────────────────────────┘
+        │              STATEKEEP (Anchor program)          │
+        │  recovery contract · bounded one-use capability  │
+        │  reconciliation · durability settlement          │
+        └───────────────┬─────────────────────────────────┘
+                        │
+        ┌───────────────┴───────────────┐
+        ▼                               ▼
+  REHEARSAL (sealed state)      LIVE PROGRAM (owner)
+  candidate transitions         applies the proven delta
+  invariant checks              keeps ownership throughout
 ```
 
-### Transaction flow
+### Recovery flow
 
-1. Protocol deploys a predicate program defining the condition over a declared account surface.
-2. Protocol calls `create_market` — baseline stored, reward funded, bond rule set, predicate hash pinned, market immutable after activation.
-3. Executor performs any state-changing transaction(s) on the protocol.
-4. Executor calls `claim` — STATEKEEP reads the current accounts, CPIs the predicate, evaluates.
-5. FALSE → rejected. TRUE → 25% paid, 75% + bond enter `PENDING`.
-6. After M slots, anyone calls `finalize` — STATEKEEP re-evaluates the predicate against current state.
-7. State held → remainder released. State broke → remainder forfeited, bond slashed.
+1. Protocol registers the recovery contract and funds the reward.
+2. The condition breaks → recovery mode.
+3. A bounded, one-use recovery capability exists for this incident.
+4. Candidate recoveries are rehearsed against the sealed current state (or attempted directly against live state).
+5. The valid transition is applied by the program that owns the state.
+6. Reconciliation checks the full protected surface.
+7. Durability window runs; then the remainder is released or the bond slashed.
+8. A proven recovery may be registered as a reusable capsule.
 
 ## The invariant
 
 ```
-For every market round:
+For every recovery:
   payment occurs at most once
-  payment > 0  ⟹  predicate(current_state) == TRUE
-  deferred reward is unreachable until finalize
-  durability failure ⟹ deferred reward == 0 (plus slash)
-  a completed market cannot reopen
+  payment > 0  ⟹  the resulting state is valid
+  protected state is never sacrificed (reconciliation)
+  the deferred reward is unreachable until the durability window closes
+  a durability failure ⟹ the deferred reward is forfeited (plus bond slash)
+  a consumed capability cannot be reused
 ```
 
-The baseline is explicit and committed at market creation. STATEKEEP never reads historical Solana state — it compares a stored baseline against the current state at claim and at finalize. No historical-state fiction.
+The baseline is explicit and committed at registration. STATEKEEP never claims to read historical chain state — it compares the committed baseline against the current state, and — where a rehearsal is used — against a sealed root the protocol committed.
 
 ## Safety, enforced on-chain
 
-| Claim | How it's enforced |
+| Property | How it's enforced |
 |---|---|
-| Cannot pay for a false state | Predicate evaluated by the protocol's own program at claim; FALSE → no payment |
-| Cannot pay 100% for a transient state | 75% locked in escrow behind the M-slot durability window |
-| Cannot be paid twice | Claim consumes the open bounty; second claimant gets `BOUNTY CLOSED` |
-| Cannot fix one metric by breaking another | Composite predicates bind protected balances (delta guards) |
-| Predicate cannot be swapped silently | Predicate hash pinned immutable at market activation |
-| Watchtower cannot decide the truth | Anyone may call finalize; the program evaluates state itself |
+| No payment for an invalid state | The transition is evaluated against current state; invalid → no payment |
+| No full payment for a transient fix | The remainder is locked behind the durability window |
+| No double payment | The one-use recovery capability is consumed by the recovery that uses it |
+| No fixing one metric by breaking another | Whole-state reconciliation of the protected surface |
+| No arbitrary mutation | The protocol pre-authorizes the shape of a valid recovery |
+| No single trusted executor | Anyone may attempt a recovery; the chain evaluates the result |
 
 ## Engineering decisions & the hard problems
 
-- **Claim-time, never historical.** Solana programs cannot read past state. The honest design is claim-time: stored baseline + current accounts → predicate. The durability window turns "was it ever true" into "did it stay true," which is the property that actually matters.
-- **The predicate is a program, not a string.** STATEKEEP never promises to evaluate arbitrary logic. It promises: *any predicate implemented as a Solana program over the accounts the protocol declares.* The protocol owns the predicate; STATEKEEP is the settlement mechanism.
-- **Durability cannot rely on "someone checks later."** That would be a keeper system with a delayed watchtower. Durability is a first-class state machine — OPEN → CLAIMED → PENDING → MATURED/FAILED — with the executor's bond at stake, so the executor's incentive is to produce state that *lasts*.
-- **One trusted keeper is cheaper — until it isn't.** The protocol does not know the optimal repair path. One keeper controls the execution strategy; an open market makes the condition public and the strategy competitive. The protocol buys the outcome, not an exclusive operational dependency.
-- **The delta-baseline problem is solved by committing the baseline.** At round creation STATEKEEP stores the minimal economic baseline the predicate requires. BEFORE = stored baseline; AFTER = current state. No pretending to read history.
+- **Settle on the result, not the call.** The economic object is the resulting state. The executor is deliberately irrelevant.
+- **Historical state is not something a program can read.** The honest design evaluates current state against a committed baseline. Nothing pretends otherwise.
+- **Recovery authority must be bounded and one-use.** A protocol never hands out open admin power; it creates a scoped capability consumed by a single incident.
+- **Durability cannot be a "someone checks later" promise.** It is a first-class phase with the executor's money at stake, so the incentive is to produce state that *lasts*.
+- **The live program keeps ownership.** Where a candidate state is rehearsed off-chain, the protocol's own program remains the sole authority that applies the resulting delta — no ownership transfer, no new runtime.
+- **Reconciliation is not a single metric.** Checking "reserve ≥ 80%" is easy and insufficient; the protected surface is reconciled in full.
 
 ## What's real vs pending — the honesty table
 
 | Capability | Status |
 |---|---|
-| State machine design (OPEN → CLAIMED → PENDING → MATURED/FAILED) | Spec'd — pending implementation |
-| Predicate-as-program CPI interface | Spec'd — pending implementation |
+| Recovery contract design | Spec'd — pending implementation |
+| Bounded one-use recovery capability | Spec'd — pending implementation |
+| Whole-state reconciliation | Spec'd — pending implementation |
 | Durability window with bond/slash | Spec'd — pending implementation |
-| Baseline commitment | Spec'd — pending implementation |
-| Adversarial predicate harness | Spec'd — pending implementation |
-| Solana Anchor program | **Pending** — not built yet |
-| TypeScript CLI + frontend | **Pending** — not built yet |
-| Devnet deployment + real transactions | **Pending** — nothing deployed yet |
-| Adversarial tests (100+) | **Pending** — not written yet |
-| Real transaction receipts | **Pending** — no tx hashes exist yet |
+| Sealed-state rehearsal | Spec'd — pending implementation |
+| Recovery capsules | Spec'd — pending implementation |
+| Anchor program | **Pending** — not built yet |
+| CLI + frontend | **Pending** — not built yet |
+| Deployment + real transactions | **Pending** — nothing deployed yet |
+| Adversarial test suite | **Pending** — not written yet |
+| Transaction receipts | **Pending** — no hashes exist yet |
 
-Nothing above is claimed as built. The build is in progress; this table will be updated line by line as each capability becomes real and verifiable.
+Nothing above is claimed as built. The project is in progress; this table is updated line by line as each capability becomes real and verifiable.
 
 ## Tests
 
-> Status: pending — the suite does not exist yet. Test output will be pasted here when the first adversarial tests land.
+> Status: pending — the suite does not exist yet. Output will be pasted here when the first adversarial tests land.
 
 ## Run it locally
 
@@ -215,10 +261,10 @@ Nothing above is claimed as built. The build is in progress; this table will be 
 ## Project layout
 
 ```
-STATEKEEP/
+statekeep/
 ├── programs/
-│   ├── statekeep/          # core program: markets, claims, durability
-│   └── predicates/         # example predicate programs
+│   ├── statekeep/          # core program: recovery contracts, capabilities, settlement
+│   └── recovery/           # example protocol integration
 ├── app/                    # frontend
 ├── tests/                  # adversarial + property tests
 ├── docs/
@@ -232,19 +278,21 @@ STATEKEEP/
 ## Tech stack
 
 - Solana (Anchor, Rust) — core program
-- TypeScript — CLI, executor tooling, frontend
+- TypeScript — CLI, tooling, frontend
 - (full stack list lands with the build)
 
 ## Roadmap
 
-- [ ] Anchor workspace + state machine implementation
-- [ ] Predicate interface + example predicates
-- [ ] Baseline commitment + durability window
+- [ ] Anchor workspace + recovery-contract state machine
+- [ ] Bounded one-use recovery capability
+- [ ] Whole-state reconciliation
+- [ ] Durability window with bond / slash
+- [ ] Sealed-state rehearsal
 - [ ] Adversarial + property test suite
-- [ ] Local validator end-to-end (create → fund → claim → pending → mature)
-- [ ] Frontend (markets, executors, live state)
-- [ ] Public devnet deployment + real transaction receipts
-- [ ] README updated line-by-line from the honesty table as items become real
+- [ ] Local end-to-end (register → degrade → recover → durable → paid)
+- [ ] Frontend (markets, live state, recovery)
+- [ ] Public deployment + real transaction receipts
+- [ ] This table updated line-by-line as items become real
 
 ## License
 
