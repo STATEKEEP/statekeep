@@ -1,5 +1,13 @@
 # STATEKEEP web — design notes
 
+> **SUPERSEDED — retained for history.** The system described below (dark
+> editorial + single amber accent) was the first pass. It was rejected as
+> reading generic / AI-generated. The current system is the daylight
+> editorial pivot documented in `daybreak-study.md` (taste calibration) and
+> `design-audit.md` (post-rebuild traceability). See `diagnosis.md` for the
+> concrete reasons the notes below did not survive contact with the taste
+> bar.
+
 Peroxide path: foundation → catalog → source → port → audit.
 
 ## Foundation
