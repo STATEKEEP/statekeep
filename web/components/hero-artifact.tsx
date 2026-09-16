@@ -8,10 +8,10 @@ import { cn } from "@/lib/cn";
 
 const ROWS: [string, React.ReactNode][] = [
   ["health condition",     <span key="h" className="text-[color:var(--amber-glow)]">reserve_ratio &gt;= 80%</span>],
-  ["allowed recovery",     <>withdraw insurance <Sep /> rebalance pool <Sep /> repay debt</>],
-  ["protected state",      <>user principal unchanged <Sep /> debt &lt;= baseline</>],
-  ["recovery reward",      <span className="text-[color:var(--amber-glow)]">as registered by the protocol</span>],
-  ["durability window",    <>M slots · settlement re-evaluates the predicate</>],
+  ["allowed recovery",     <span key="a">withdraw insurance <Sep /> rebalance pool <Sep /> repay debt</span>],
+  ["protected state",      <span key="p">user principal unchanged <Sep /> debt &lt;= baseline</span>],
+  ["recovery reward",      <span key="r" className="text-[color:var(--amber-glow)]">as registered by the protocol</span>],
+  ["durability window",    <span key="d">M slots · settlement re-evaluates the predicate</span>],
 ];
 
 function Sep() {
