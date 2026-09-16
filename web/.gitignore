@@ -1,0 +1,10 @@
+node_modules/
+.next/
+out/
+.env
+.env.local
+.env.*.local
+.turbo/
+*.tsbuildinfo
+public/generated/*.png
+!public/generated/.gitkeep
