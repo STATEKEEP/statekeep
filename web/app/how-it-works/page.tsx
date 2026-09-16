@@ -5,6 +5,7 @@ import { Section, Lines, Line } from "@/components/section";
 import { StateBadge } from "@/components/state-badge";
 import { StateMachineDiagram } from "@/components/state-machine-diagram";
 import { HeroArtifact } from "@/components/hero-artifact";
+import { HeroBackdrop } from "@/components/hero-backdrop";
 
 export const metadata = {
   title: "How it works — STATEKEEP",
@@ -17,6 +18,7 @@ export default function HowItWorks() {
     <>
       {/* HERO */}
       <section className="hero-ink">
+        <HeroBackdrop />
         <Nav onInk />
         <div className="shell" style={{ paddingBlock: "clamp(96px, 12vw, 160px)" }}>
           <div className="max-w-3xl">

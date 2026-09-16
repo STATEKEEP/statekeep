@@ -7,12 +7,14 @@ import { StateMachineDiagram } from "@/components/state-machine-diagram";
 import { HeroArtifact } from "@/components/hero-artifact";
 import { ProofBand } from "@/components/proof-band";
 import { PredicateDemo } from "@/components/predicate-demo";
+import { HeroBackdrop } from "@/components/hero-backdrop";
 
 export default function Home() {
   return (
     <>
       {/* HERO — the inverted ink band, daybreak's signature move */}
       <section className="hero-ink">
+        <HeroBackdrop />
         <Nav onInk />
         <div className="shell relative" style={{ paddingBlock: "clamp(120px, 14vw, 200px)" }}>
           <div className="grid lg:grid-cols-[1.05fr_0.95fr] gap-16 lg:gap-24 items-start">

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
 import { Section, Lines, Line } from "@/components/section";
+import { HeroBackdrop } from "@/components/hero-backdrop";
 
 export const metadata = {
   title: "Docs — STATEKEEP",
@@ -52,6 +53,7 @@ export default function DocsIndex() {
   return (
     <>
       <section className="hero-ink">
+        <HeroBackdrop />
         <Nav onInk />
         <div className="shell" style={{ paddingBlock: "clamp(96px, 12vw, 160px)" }}>
           <div className="max-w-3xl">

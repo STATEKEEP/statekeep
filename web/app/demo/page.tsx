@@ -3,6 +3,7 @@ import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
 import { Section, Lines, Line } from "@/components/section";
 import { PredicateDemo } from "@/components/predicate-demo";
+import { HeroBackdrop } from "@/components/hero-backdrop";
 
 export const metadata = {
   title: "Try the predicate — STATEKEEP",
@@ -14,6 +15,7 @@ export default function DemoPage() {
   return (
     <>
       <section className="hero-ink">
+        <HeroBackdrop />
         <Nav onInk />
         <div className="shell" style={{ paddingBlock: "clamp(96px, 12vw, 160px)" }}>
           <div className="max-w-3xl">
