@@ -8,6 +8,7 @@ import { HeroArtifact } from "@/components/hero-artifact";
 import { ProofBand } from "@/components/proof-band";
 import { PredicateDemo } from "@/components/predicate-demo";
 import { HeroBackdrop } from "@/components/hero-backdrop";
+import { SigilProtocol, SigilExecutor, SigilChain } from "@/components/sigils";
 
 export default function Home() {
   return (
@@ -174,16 +175,19 @@ export default function Home() {
       >
         <div className="grid md:grid-cols-3 gap-4">
           <RoleCard
+            sigil={<SigilProtocol />}
             eyebrow="the protocol"
             title="defines safety"
             body="Registers the recovery contract — the five lines above. Funds the reward vault. Never handed open admin authority."
           />
           <RoleCard
+            sigil={<SigilExecutor />}
             eyebrow="any executor"
             title="discovers execution"
             body="Anyone may attempt a recovery — bond required. Rehearse against a sealed copy of state; apply the proven delta through the live program."
           />
           <RoleCard
+            sigil={<SigilChain />}
             eyebrow="the chain"
             title="decides settlement"
             body="Evaluates the transition against current state, reconciles the protected surface, holds through the durability window, pays or slashes."
@@ -437,16 +441,19 @@ function DurabilityTimeline() {
 }
 
 function RoleCard({
+  sigil,
   eyebrow,
   title,
   body,
 }: {
+  sigil?: React.ReactNode;
   eyebrow: string;
   title: string;
   body: string;
 }) {
   return (
     <div className="card group hover:border-[color:var(--hairline-2)]" style={{ background: "#fff" }}>
+      {sigil && <div className="mb-5">{sigil}</div>}
       <div className="micro mb-3">
         <span className="micro-dot" />
         {eyebrow}
